@@ -53,13 +53,13 @@ El conjunto de datos contiene préstamos originados entre 2016 y 2018. Para resp
                           ESQUEMA DEL PIPELINE DE MODELIZACIÓN
                           
   Variables de Entrada       PD: Regresión Logística        EAD: GLM Fraccional s/ CCF
-  (Solicitud y Buró)    ──>  (Parsimoniosa, 45 vars)   ──>  (R² ≈ 0.90)
+  (Solicitud y Buró)    ──>  (Parsimoniosa, 45 vars)   ──>  (CCF acotado en [0, 1])
                                      │                                  │
                                      └──────────────────┬───────────────┘
                                                         │
                                                         v
-                                              LGD: Regresión Ridge
-                                              (Severidad condicional)
+                                              LGD: GLM Fraccional (QMLE)
+                                              (Severidad acotada en [0, 1])
                                                         │
                                                         v
                                           Cálculo de Provisión (ECL)
@@ -68,16 +68,18 @@ El conjunto de datos contiene préstamos originados entre 2016 y 2018. Para resp
 
 ### 4.1 Probabilidad de Default (PD)
 Se compararon modelos lineales regularizados (Lasso, Ridge, Elastic Net) y algoritmos basados en árboles (Random Forest, Gradient Boosting). 
-* Se seleccionó una **Regresión Logística (Logit MLE)** depurada con 45 variables por su equilibrio entre capacidad discriminante ($\text{AUC} \approx 0,675$, alcanzando el $98\%$ del rendimiento de modelos de boosting más complejos) y su alta estabilidad temporal y facilidad de auditoría e interpretación.
+* Se seleccionó una **Regresión Logística (Logit MLE)** depurada con 45 variables por su equilibrio entre capacidad discriminante ($\text{AUC} \approx 0,675$, alcanzando el $98\%$ del rendimiento de modelos de boosting más complejos), su alta estabilidad temporal y su interpretabilidad directa en escala de *log-odds*.
 
 ### 4.2 Exposición en el Momento de Impago (EAD / CCF)
-Dado que los préstamos van amortizando cuotas a lo largo del tiempo, no se pierde el importe inicial completo.
-* Se modeliza el **Factor de Conversión de Crédito (CCF)**, que mide la fracción de capital insolvente al fallar, acotada entre $0$ y $1$.
-* Se utiliza un **Modelo Lineal Generalizado Fraccional (GLM QMLE)**, alcanzando un $R^2 \approx 0,897$, lo que mejora notablemente respecto a utilizar un factor constante de exposición.
+Dado que los préstamos van amortizando cuotas a lo largo del tiempo, la exposición en caso de fallo no es el capital concedido inicialmente.
+* Se modeliza el **Factor de Conversión de Crédito (CCF)**, que cuantifica la proporción de deuda aún insolvente al momento del impago.
+* En lugar de modelos lineales tradicionales que pueden generar predicciones ilógicas fuera de rango, se emplea un **Modelo Lineal Generalizado Fraccional (GLM Logit QMLE)**, garantizando que el CCF permanezca estrictamente acotado en $(0, 1)$.
+* Este modelado reduce el error monetario absoluto (MAE en USD sobre el saldo vivo real) en más de un **$22\%$** respecto al benchmark estándar de utilizar una media global constante de exposición.
 
 ### 4.3 Severidad de la Pérdida (LGD)
-* En préstamos personales sin colateral o garantía real, las recuperaciones tras el impago suelen ser bajas (la severidad media en la cartera se sitúa en torno al $90\% - 94\%$).
-* Se utiliza una **Regresión Lineal Regularizada (Ridge)** sobre los créditos fallidos para estimar la severidad esperada.
+En préstamos personales sin colateral o garantía pignoraticia, las pérdidas tras el impago se concentran de forma asimétrica cerca del $100\%$ (tasa de recuperación muy reducida, con una severidad media observada en cartera superior al $90\%$).
+* Los modelos lineales convencionales (como OLS o Ridge) presentan el problema estructural de predecir valores menores que $0$ o mayores que $1$, lo cual carece de sentido financiero y distorsiona el cálculo contable de provisiones.
+* Por ello, se implementa un **GLM Logit Fraccional (QMLE)** sobre los préstamos fallidos, respetando el soporte natural $(0, 1)$ de la severidad y modelando adecuadamente la tasa de pérdida condicional esperada.
 
 ### 4.4 Integración y Margen de Conservadurismo (MoC)
 Bajo los estándares de supervisión bancaria, es habitual aplicar un Margen de Conservadurismo (*Margin of Conservatism*) para gestionar la incertidumbre de estimación:
